@@ -44,10 +44,21 @@ private slots:
 
     void on_TimeStamp_toggled(bool checked);
 
+    void on_Stop_toggled(bool checked);
+
 private:
     Ui::MainWindow *ui;
+
+    //default maxline and characters
     int _maxLine=15000;
+    int _cleanBrowserChar=100;
+    int _wortPerLine=50;
+
+    //default timer interval
     int _refreshTime=500;
+    int _connectionCheckInterval=1000;
+    int _retryInterval=500;
+
     QString path;
     QString port;
     QString fileName;

@@ -12,22 +12,38 @@ MainWindow::MainWindow(QWidget *parent)
 
     _allRecData=new QString;
 
-    _maxLine=5000;
-    //msec
+    //when the number of characters exceed _maxLine*_wortPerLine, delete _wortPerLine characters at the beginning
+    _maxLine=10000;
+    _cleanBrowserChar=500;
+    _wortPerLine=50;
+
+
+    //Setting timer interval (msec)
     _refreshTime=500;
+    _retryInterval=1000;
+    _connectionCheckInterval=1000;
+
+    //String init
+    path=QDir(QCoreApplication::applicationDirPath()).absolutePath()+"/ControllerLOG";
+    port=QString("ttyUSB0");
+    fileName=QString("ControllerLOG.txt");
 \
     InitialPort();
     InitialTimer();
 
-    path=QDir(QCoreApplication::applicationDirPath()).absolutePath()+"/ControllerLOG";
-    port=QString("ttyUSB0");
-    fileName=QString("ControllerLOG.txt");
-
     ui->TimeStamp->setCheckable(true);
     ui->TimeStamp->setChecked(false);
 
-    qDebug()<<"Port open status: "<<SetPort(port);
-    qDebug()<<"Return code opening "<<port<<" : "<<OpenPort();
+    ui->Stop->setCheckable(true);
+    ui->Stop->setChecked(false);
+
+    //set portname and open serial port
+    qDebug()<<"Port open status: "
+           <<SetPort(port);
+    qDebug()<<"Return code opening "<<port<<" : "
+           <<OpenPort();
+
+    //_refreshFile->start();
 
 }
 
@@ -64,7 +80,7 @@ void MainWindow::InitialPort()
 void MainWindow::InitialTimer()
 {
     _connectionCheck=new QTimer(this);
-    _connectionCheck->setInterval(1000);
+    _connectionCheck->setInterval(_connectionCheckInterval);
     connect(_connectionCheck,&QTimer::timeout,this,&MainWindow::ConnectionCheck);
 
     _refreshFile=new QTimer(this);
@@ -72,7 +88,7 @@ void MainWindow::InitialTimer()
     connect(_refreshFile,&QTimer::timeout,this,&MainWindow::RefreshFile);
 
     _retryConnect=new QTimer(this);
-    _retryConnect->setInterval(1000);
+    _retryConnect->setInterval(_retryInterval);
     connect(_retryConnect,&QTimer::timeout,this,&MainWindow::RetryConnect);
 }
 
@@ -87,6 +103,8 @@ int MainWindow::OpenPort()
     else
     {
         return 0;
+        //start retry timer when booting connetion failed
+        if(!_retryConnect->isActive()){_retryConnect->start();}
     }
 }
 
@@ -173,10 +191,12 @@ void MainWindow::RetryConnect()
         case 0:
             return;
         case 1:
+            //stop the retry timer if serial port is connected
             _retryConnect->stop();
             break;
         }
     }
+    //qDebug("Try to connect");
 }
 
 void MainWindow::GetLogData()
@@ -196,9 +216,9 @@ void MainWindow::GetLogData()
     }
 
     QString textInBrowser=ui->textBrowser->toPlainText();
-    if(textInBrowser.length()>_maxLine*50)
+    if(textInBrowser.size()>_maxLine*_wortPerLine)
     {
-        textInBrowser.remove(0,100);
+        textInBrowser.remove(0,_cleanBrowserChar);
         ui->textBrowser->setText(textInBrowser);
     }
 }
@@ -207,10 +227,6 @@ void MainWindow::RefreshFile()
 {
     QMutexLocker writeLocker(_writeMutex);
     _allRecData->clear();
-    for(auto &a:_recData)
-    {
-        _allRecData->append(*a);
-    }
     QDir dir;
     if(!dir.exists(path))
     {
@@ -230,6 +246,23 @@ void MainWindow::RefreshFile()
         qDebug("failed to open");
         return;
     }
+    QTextStream in(&file);
+    _allRecData->append(in.readAll());
+
+    //add new rec data to the _recData
+    for(auto &a:_recData)
+    {
+        _allRecData->append(*a);
+    }
+
+    //Test capacity
+    //_allRecData->append(QString("Test222222wqoiuweqwio2321wqoieuwqieu239wqeoiu29\n"));
+
+    //Delete _wortPerLine in the beginning when exceeding _maxLine*_wortPerLine
+    if(_allRecData->size()>_maxLine*_wortPerLine)
+    {
+        _allRecData->remove(0,_wortPerLine);
+    }
     file.resize(0);
     QTextStream out(&file);
     out<<*_allRecData;
@@ -248,4 +281,22 @@ void MainWindow::on_TimeStamp_toggled(bool checked)
     {
         qDebug()<<"Disable Timestamp";
     }
+}
+
+void MainWindow::on_Stop_toggled(bool checked)
+{
+    if(checked)
+    {
+        ui->Stop->setText("Start");
+        if(_logPort->isOpen()){_logPort->close();}
+        if(_refreshFile->isActive()){_refreshFile->stop();}
+        if(_connectionCheck->isActive()){_connectionCheck->stop();}
+        if(_retryConnect->isActive()){_retryConnect->stop();}
+    }
+    else
+    {
+       ui->Stop->setText("Stop");
+       _retryConnect->start();
+    }
+
 }
