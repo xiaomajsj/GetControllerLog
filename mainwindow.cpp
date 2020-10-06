@@ -10,7 +10,13 @@ MainWindow::MainWindow(QWidget *parent)
     _readMutex=new QMutex();
     _writeMutex=new QMutex();
 
+    //String init
+    path=QDir(QCoreApplication::applicationDirPath()).absolutePath()+"/ControllerLOG";
+    port=QString("ttyUSB0");
+    fileName=QString("ControllerLOG.txt");
+
     _allRecData=new QString;
+    _originalData=new QString(GetOriginDataFromFile());
 
     //when the number of characters exceed _maxLine*_wortPerLine, delete _wortPerLine characters at the beginning
     _maxLine=10000;
@@ -22,17 +28,12 @@ MainWindow::MainWindow(QWidget *parent)
     _refreshTime=500;
     _retryInterval=1000;
     _connectionCheckInterval=1000;
-
-    //String init
-    path=QDir(QCoreApplication::applicationDirPath()).absolutePath()+"/ControllerLOG";
-    port=QString("ttyUSB0");
-    fileName=QString("ControllerLOG.txt");
 \
     InitialPort();
     InitialTimer();
 
     ui->TimeStamp->setCheckable(true);
-    ui->TimeStamp->setChecked(false);
+    ui->TimeStamp->setChecked(true);
 
     ui->Stop->setCheckable(true);
     ui->Stop->setChecked(false);
@@ -40,8 +41,11 @@ MainWindow::MainWindow(QWidget *parent)
     //set portname and open serial port
     qDebug()<<"Port open status: "
            <<SetPort(port);
+    int openport=OpenPort();
     qDebug()<<"Return code opening "<<port<<" : "
-           <<OpenPort();
+           <<openport;
+
+    if(!openport==1){ui->Stop->setChecked(true);}
 
     //_refreshFile->start();
 
@@ -57,13 +61,27 @@ MainWindow::~MainWindow()
     delete _writeMutex;
 
     delete _allRecData;
+    delete _originalData;
 
+    CleanList();
+
+    delete ui;
+}
+
+void MainWindow::CleanList()
+{
     for(auto &a:_recData)
     {
         if(!(a==nullptr)){delete a;}
     }
-
-    delete ui;
+    for(auto &a:_timeStamp)
+    {
+        if(!(a==nullptr)){delete a;}
+    }
+    for(auto &a:_outputData)
+    {
+        if(!(a==nullptr)){delete a;}
+    }
 }
 
 void MainWindow::InitialPort()
@@ -189,6 +207,7 @@ void MainWindow::RetryConnect()
         switch(status)
         {
         case 0:
+            ui->Stop->setChecked(true);
             return;
         case 1:
             //stop the retry timer if serial port is connected
@@ -196,23 +215,48 @@ void MainWindow::RetryConnect()
             break;
         }
     }
+    else
+    {
+        ui->Stop->setChecked(true);
+    }
     //qDebug("Try to connect");
 }
 
 void MainWindow::GetLogData()
 {
+    int msecDay=QTime::currentTime().msecsSinceStartOfDay();
+    QTime msecNow=QTime::fromMSecsSinceStartOfDay(msecDay);
+    QString now=msecNow.toString("hh:mm:ss.zzz");
+    QString timestamp="["+now+"]  ";
+
+
     QMutexLocker PullingLocker(_readMutex);
     QString recv = _logPort->readAll();
+    bool isTimeStamp = ui->TimeStamp->isChecked();
+    QString outputData = timestamp+recv;
+
+
     if(_recData.size()>_maxLine)
     {
         delete _recData.first();
-        ui->textBrowser->append(recv);
+        delete _timeStamp.first();
+        delete _outputData.first();
+
+        if(isTimeStamp){ui->textBrowser->append(outputData);}
+        else{ui->textBrowser->append(recv);}
+
         _recData.append(new QString(recv));
+        _timeStamp.append(new QString(timestamp));
+        _outputData.append(new QString(timestamp+recv));
     }
     else
     {
-        ui->textBrowser->append(recv);
+        if(isTimeStamp){ui->textBrowser->append(outputData);}
+        else{ui->textBrowser->append(recv);}
+
         _recData.append(new QString(recv));
+        _timeStamp.append(new QString(timestamp));
+        _outputData.append(new QString(timestamp+recv));
     }
 
     QString textInBrowser=ui->textBrowser->toPlainText();
@@ -227,6 +271,8 @@ void MainWindow::RefreshFile()
 {
     QMutexLocker writeLocker(_writeMutex);
     _allRecData->clear();
+    _allRecData->append(*_originalData);
+
     QDir dir;
     if(!dir.exists(path))
     {
@@ -246,15 +292,24 @@ void MainWindow::RefreshFile()
         qDebug("failed to open");
         return;
     }
-    QTextStream in(&file);
-    _allRecData->append(in.readAll());
 
     //add new rec data to the _recData
-    for(auto &a:_recData)
+    bool isTimeStamp = ui->TimeStamp->isChecked();
+    if(isTimeStamp)
     {
-        _allRecData->append(*a);
+        for(auto &a:_outputData)
+        {
+            _allRecData->append(*a);
+        }
     }
+    else
+    {
+        for(auto &a:_recData)
+        {
+            _allRecData->append(*a);
+        }
 
+    }
     //Test capacity
     //_allRecData->append(QString("Test222222wqoiuweqwio2321wqoieuwqieu239wqeoiu29\n"));
 
@@ -271,16 +326,78 @@ void MainWindow::RefreshFile()
     writeLocker.unlock();
 }
 
+QString MainWindow::GetOriginDataFromFile()
+{
+    QMutexLocker writeLocker(_writeMutex);
+    QString data;
+
+    QDir dir;
+    if(!dir.exists(path))
+    {
+        dir.mkpath(path);
+    }
+    if(!dir.exists(path))
+    {
+        qDebug("Failed to add path /ControllerLOG");
+        return QString("");
+    }
+    //QString fileNameWithTime=QDate::currentDate().toString();
+    //fileNameWithTime+=".txt";
+
+    QFile file(path+"/"+fileName);
+    if(!file.open(QIODevice::ReadWrite | QIODevice::Text))
+    {
+        qDebug("failed to open");
+        return QString("");
+    }
+    QTextStream in(&file);
+    data.append(in.readAll());
+    file.close();
+    return data;
+}
+
+
 void MainWindow::on_TimeStamp_toggled(bool checked)
 {
     if(checked)
     {
         qDebug()<<"Enable Timestamp";
+        RefreshBrowser(checked);
     }
     else
     {
         qDebug()<<"Disable Timestamp";
+        RefreshBrowser(checked);
     }
+}
+void MainWindow::RefreshBrowser(bool TimstampChecked)
+{
+    ui->textBrowser->clear();
+    ui->textBrowser->append(*_originalData);
+    if(_outputData.size()<=0 || _recData.size()<=0){return;}
+
+    if(TimstampChecked)
+    {
+        for(auto a:_outputData)
+        {
+            ui->textBrowser->append(*a);
+        }
+    }
+    else
+    {
+        for(auto a:_recData)
+        {
+            ui->textBrowser->append(*a);
+        }
+    }
+
+    QString textInBrowser=ui->textBrowser->toPlainText();
+    if(textInBrowser.size()>_maxLine*_wortPerLine)
+    {
+        textInBrowser.remove(0,_cleanBrowserChar);
+        ui->textBrowser->setText(textInBrowser);
+    }
+
 }
 
 void MainWindow::on_Stop_toggled(bool checked)
@@ -296,6 +413,7 @@ void MainWindow::on_Stop_toggled(bool checked)
     else
     {
        ui->Stop->setText("Stop");
+       RetryConnect();
        _retryConnect->start();
     }
 

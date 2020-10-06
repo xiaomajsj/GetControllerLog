@@ -13,10 +13,12 @@
 #include <QDebug>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QHash>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
+
 
 class MainWindow : public QMainWindow
 {
@@ -31,6 +33,11 @@ public:
 
     void InitialPort();
     void InitialTimer();
+
+    void CleanList();
+    void RefreshBrowser(bool TimstampChecked);
+
+    QString GetOriginDataFromFile();
 
 
 
@@ -72,7 +79,16 @@ private:
     QList<QSerialPortInfo> _portList;
     QSerialPort* _logPort;
 
+
     QList<QString *> _recData;
+    QList<QString *> _outputData;
+    QList<QString *> _timeStamp;
+
+//    QHash<StringState, QString*> _recDataHash;
+//    QHash<StringState, QString*> _outputDataHash;
+//    QHash<StringState, QString*> _timeStampHash;
+
     QString *_allRecData;
+    QString *_originalData;
 };
 #endif // MAINWINDOW_H
